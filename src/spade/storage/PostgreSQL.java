@@ -27,7 +27,8 @@ import spade.core.AbstractVertex;
 
 public class PostgreSQL extends AbstractStorage {
   // Bulk insert batch size
-  private static final int MAX_EDGE_BATCH_SIZE = 1024 * 16;
+  private static final int MAX_VERTEX_BATCH_SIZE = 1024 * 8;
+  private static final int MAX_EDGE_BATCH_SIZE = MAX_VERTEX_BATCH_SIZE * 2;
 
   private static class VertexAndEdgeBatch {
     public ArrayList<AbstractVertex> vertices = new ArrayList<AbstractVertex>();
@@ -199,12 +200,15 @@ public class PostgreSQL extends AbstractStorage {
           String id = String.valueOf(start_id + i);
           for (Map.Entry<String, String> annoEntry :
                    vertexBatchBuffer.get(i).getAnnotations().entrySet()) {
-            vertexAnnos.append(id);
-            vertexAnnos.append('|');
-            vertexAnnos.append(annoEntry.getKey());
-            vertexAnnos.append('|');
-            AppendEscaped(vertexAnnos, annoEntry.getValue());
-            vertexAnnos.append('\n');
+            String annoKey = annoEntry.getKey();
+            if (!annoKey.startsWith("_$")) {
+              vertexAnnos.append(id);
+              vertexAnnos.append('|');
+              vertexAnnos.append(annoKey);
+              vertexAnnos.append('|');
+              AppendEscaped(vertexAnnos, annoEntry.getValue());
+              vertexAnnos.append('\n');
+            }
           }
         }
         vertexAnnoCopyExecutor.commit(vertexAnnos.toString());
@@ -259,12 +263,15 @@ public class PostgreSQL extends AbstractStorage {
           String id = String.valueOf(start_id + i);
           for (Map.Entry<String, String> annoEntry :
                    edgeBatchBuffer.get(i).getAnnotations().entrySet()) {
-            edgeAnnos.append(id);
-            edgeAnnos.append('|');
-            edgeAnnos.append(annoEntry.getKey());
-            edgeAnnos.append('|');
-            AppendEscaped(edgeAnnos, annoEntry.getValue());
-            edgeAnnos.append('\n');
+            String annoKey = annoEntry.getKey();
+            if (!annoKey.startsWith("_$")) {
+              edgeAnnos.append(id);
+              edgeAnnos.append('|');
+              edgeAnnos.append(annoEntry.getKey());
+              edgeAnnos.append('|');
+              AppendEscaped(edgeAnnos, annoEntry.getValue());
+              edgeAnnos.append('\n');
+            }
           }
         }
         edgeAnnoCopyExecutor.commit(edgeAnnos.toString());
@@ -365,6 +372,9 @@ public class PostgreSQL extends AbstractStorage {
   @Override
   public boolean putVertex(AbstractVertex incomingVertex) {
     batch.vertices.add(incomingVertex);
+    if (batch.vertices.size() >= MAX_VERTEX_BATCH_SIZE) {
+      commitBatch();
+    }
     return true;
   }
 
