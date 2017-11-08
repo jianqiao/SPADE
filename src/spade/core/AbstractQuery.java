@@ -1,8 +1,5 @@
 package spade.core;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -42,6 +39,10 @@ public abstract class AbstractQuery<R, P>
     public static void setCurrentStorage(AbstractStorage storage)
     {
         currentStorage = storage;
+    }
+
+    public static String getCurrentStorageSimpleName() {
+      return currentStorage.getClass().getSimpleName();
     }
 
     public void register()

@@ -1,10 +1,7 @@
 package spade.analyzer;
 
-import spade.core.AbstractAnalyzer;
-import spade.core.AbstractQuery;
-import spade.core.Graph;
-import spade.core.Kernel;
-import spade.resolver.Recursive;
+import static spade.core.AbstractQuery.USE_SCAFFOLD;
+import static spade.core.AbstractStorage.scaffold;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -12,11 +9,14 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
@@ -24,8 +24,12 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
-import static spade.core.AbstractQuery.USE_SCAFFOLD;
-import static spade.core.AbstractStorage.scaffold;
+import spade.core.AbstractAnalyzer;
+import spade.core.AbstractQuery;
+import spade.core.Graph;
+import spade.core.Kernel;
+import spade.query.quickgrail.QuickGrail;
+import spade.resolver.Recursive;
 
 /**
  * @author raza
@@ -161,20 +165,49 @@ public class CommandLine extends AbstractAnalyzer
                     {
                         try
                         {
-                            parseQuery(line);
-                            AbstractQuery queryClass;
                             Class<?> returnType;
                             Object result;
-                            if(USE_SCAFFOLD)
+                            HashMap<String, Object> metaData = new HashMap<String, Object>();
+                            boolean useQuickstep = AbstractQuery.getCurrentStorageSimpleName().equals("Quickstep");
+                            if (useQuickstep)
                             {
-                                result = scaffold.queryManager(queryParameters);
-                                returnType = Graph.class;
+                                try
+                                {
+                                    QuickGrail processor = new QuickGrail();
+                                    result = processor.execute(line + "\n", null);
+                                    if(result instanceof spade.query.quickgrail.utility.Response)
+                                    {
+                                        spade.query.quickgrail.utility.Response response =
+                                            (spade.query.quickgrail.utility.Response) result;
+                                        result = response.getResult();
+                                        metaData = response.getMetaData();
+                                    }
+                                }
+                                catch(Exception e)
+                                {
+                                    StringWriter sw = new StringWriter();
+                                    PrintWriter pw = new PrintWriter(sw);
+                                    e.printStackTrace(pw);
+                                    metaData.put("type", "Error");
+                                    result = sw.toString();
+                                }
+                                returnType = result.getClass();
                             }
                             else
                             {
-                                queryClass = (AbstractQuery) Class.forName(getFunctionClassName(functionName)).newInstance();
-                                returnType = Class.forName(getReturnType(functionName));
-                                result = queryClass.execute(queryParameters, resultLimit);
+                                parseQuery(line);
+                                AbstractQuery queryClass;
+                                if(USE_SCAFFOLD)
+                                {
+                                    result = scaffold.queryManager(queryParameters);
+                                    returnType = Graph.class;
+                                }
+                                else
+                                {
+                                    queryClass = (AbstractQuery) Class.forName(getFunctionClassName(functionName)).newInstance();
+                                    returnType = Class.forName(getReturnType(functionName));
+                                    result = queryClass.execute(queryParameters, resultLimit);
+                                }
                             }
                             if(result != null && returnType.isAssignableFrom(result.getClass()))
                             {
@@ -217,7 +250,15 @@ public class CommandLine extends AbstractAnalyzer
 //                                Logger.getLogger(CommandLine.QueryConnection.class.getName()).log(Level.INFO, string);
 //                                string += result.toString();
 //                                queryOutputStream.writeObject(string);
-                                queryOutputStream.writeObject(result.toString());
+                                if(useQuickstep)
+                                {
+                                    queryOutputStream.writeObject(metaData);
+                                    queryOutputStream.writeObject(result);
+                                }
+                                else
+                                {
+                                    queryOutputStream.writeObject(result.toString());
+                                }
                             }
                             else
                             {
