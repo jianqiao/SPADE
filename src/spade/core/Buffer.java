@@ -29,72 +29,84 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * @author Dawood Tariq
  */
 public class Buffer {
+  private final static int MAX_QUEUE_SIZE = 0x100000;
+  private final Queue<Object> queue;
 
-    private final Queue<Object> queue;
+  /**
+   * Empty constructor for this class.
+   *
+   */
+  public Buffer() {
+    queue = new ConcurrentLinkedQueue<>();
+  }
 
-    /**
-     * Empty constructor for this class.
-     *
-     */
-    public Buffer() {
-        queue = new ConcurrentLinkedQueue<>();
+  /**
+   * This method is called by the reporter to send vertices to this buffer.
+   *
+   * @param incomingVertex
+   *          The vertex to be received by this buffer.
+   * @return True if the buffer was successfully added to the buffer.
+   */
+  public boolean putVertex(AbstractVertex incomingVertex) {
+    if (queue.size() >= MAX_QUEUE_SIZE) {
+      try {
+        Thread.sleep(10000);
+      } catch (InterruptedException e) {}
+    }
+    
+    if (incomingVertex == null) {
+      return false;
+    } else {
+      return queue.add(incomingVertex);
+    }
+  }
+
+  /**
+   * This method is called by the reporter to send edges to this buffer.
+   *
+   * @param incomingEdge
+   *          The edge to be received by this buffer.
+   * @return True if the edge was successfully added to the buffer.
+   */
+  public boolean putEdge(AbstractEdge incomingEdge) {
+    if (queue.size() >= MAX_QUEUE_SIZE) {
+      try {
+        Thread.sleep(10000);
+      } catch (InterruptedException e) {}
     }
 
-    /**
-     * This method is called by the reporter to send vertices to this buffer.
-     *
-     * @param incomingVertex The vertex to be received by this buffer.
-     * @return True if the buffer was successfully added to the buffer.
-     */
-    public boolean putVertex(AbstractVertex incomingVertex) {
-        if (incomingVertex == null) {
-            return false;
-        } else {
-            return queue.add(incomingVertex);
-        }
+    if ((incomingEdge == null) || (incomingEdge.getChildVertex() == null) || (incomingEdge.getParentVertex() == null)) {
+      return false;
+    } else {
+      return queue.add(incomingEdge);
     }
+  }
 
-    /**
-     * This method is called by the reporter to send edges to this buffer.
-     *
-     * @param incomingEdge The edge to be received by this buffer.
-     * @return True if the edge was successfully added to the buffer.
-     */
-    public boolean putEdge(AbstractEdge incomingEdge) {
-        if ((incomingEdge == null)
-                || (incomingEdge.getChildVertex() == null)
-                || (incomingEdge.getParentVertex() == null)) {
-            return false;
-        } else {
-            return queue.add(incomingEdge);
-        }
-    }
+  /**
+   * This method is used to extract provenance elements from the buffer.
+   *
+   * @return The provenance element from the head of the queue.
+   */
+  public Object getBufferElement() {
+    return queue.poll();
+  }
 
-    /**
-     * This method is used to extract provenance elements from the buffer.
-     *
-     * @return The provenance element from the head of the queue.
-     */
-    public Object getBufferElement() {
-        return queue.poll();
-    }
+  /**
+   * This method is used to determine whether the buffer is empty or not.
+   *
+   * @return True if the buffer is empty.
+   */
+  public boolean isEmpty() {
+    return queue.isEmpty();
+  }
 
-    /**
-     * This method is used to determine whether the buffer is empty or not.
-     *
-     * @return True if the buffer is empty.
-     */
-    public boolean isEmpty() {
-        return queue.isEmpty();
-    }
-
-    /**
-     * This method is mainly used for debugging and monitoring purposes to get
-     * the size of the internal buffer
-     *
-     * @return the number of elements in the buffer
-     */
-    public int size() {
-        return queue.size();
-    }
+  /**
+   * This method is mainly used for debugging and monitoring purposes to get the
+   * size of the internal buffer
+   *
+   * @return the number of elements in the buffer
+   */
+  public int size() {
+    return queue.size();
+  }
 }
