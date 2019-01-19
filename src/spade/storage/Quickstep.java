@@ -192,8 +192,14 @@ public class Quickstep extends AbstractStorage {
     }
 
     @Override
-    public Void call() throws Exception {
-      processBatch();
+    public Void call() {
+//      try {
+//        processBatch();
+//      } catch (Exception e) {
+//        StringWriter sw = new StringWriter();
+//        e.printStackTrace(new PrintWriter(sw));
+//        logger.log(Level.SEVERE, e.toString());
+//      }
       batchBuffer.reset();
       return null;
     }
@@ -300,7 +306,6 @@ public class Quickstep extends AbstractStorage {
             "COPY SELECT c.idx, s.id, d.id" +
             "     FROM   vertex_md5_cache s, vertex_md5_cache d, edge_md5_cache c" +
             "     WHERE  s.md5 = c.src AND d.md5 = c.dst" +
-            "       AND  s.id >= 0 AND d.id >= 0" +
             " TO stdout WITH (DELIMITER e'\\n');");
         String edgeIdx[] = rs.split("\n");
         rs = null;
