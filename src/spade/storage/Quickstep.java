@@ -225,7 +225,7 @@ public class Quickstep extends AbstractStorage {
       if (vertices.size() > 0) {
         int lastNumVertices;
         try {
-          String sn = qs.executeQuery("COPY SELECT COUNT(*) FROM vertex TO stdout;");
+          String sn = qs.executeQuery("COPY SELECT COUNT(*) FROM trace_base_vertex TO stdout;");
           lastNumVertices = Integer.parseInt(sn.trim());
         } catch (Exception e) {
           logger.log(Level.SEVERE, e.getMessage());
@@ -270,7 +270,7 @@ public class Quickstep extends AbstractStorage {
       if (edges.size() > 0) {
         long lastNumEdges;
         try {
-          String sn = qs.executeQuery("COPY SELECT COUNT(*) FROM edge TO stdout;");
+          String sn = qs.executeQuery("COPY SELECT COUNT(*) FROM trace_base_edge TO stdout;");
           lastNumEdges = Long.parseLong(sn.trim());
         } catch (Exception e) {
           logger.log(Level.SEVERE, e.getMessage());

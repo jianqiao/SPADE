@@ -336,8 +336,8 @@ public class QuickstepConfiguration {
                   "cacheDatabasePath = " + cacheDatabasePath + "\n" +
                   "cacheDatabaseName = " + cacheDatabaseName + "\n" +
                   "cacheSize = " + cacheSize + "\n" +
-                  "cacheBloomfilterFalsePositiveProbability" + cacheBloomfilterFalsePositiveProbability + "\n" +
-                  "cacheBloomFilterExpectedNumberOfElements" + cacheBloomFilterExpectedNumberOfElements + "\n";
+                  "cacheBloomfilterFalsePositiveProbability = " + cacheBloomfilterFalsePositiveProbability + "\n" +
+                  "cacheBloomFilterExpectedNumberOfElements = " + cacheBloomFilterExpectedNumberOfElements + "\n";
 
     if (debugLogFilePath != null) {
       info += "debugLogFilePath = " + debugLogFilePath + "\n";
