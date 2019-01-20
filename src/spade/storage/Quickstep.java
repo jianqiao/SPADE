@@ -25,6 +25,7 @@ import static spade.core.Kernel.FILE_SEPARATOR;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Map;
@@ -47,11 +48,20 @@ import spade.storage.quickstep.GraphBatch;
 import spade.storage.quickstep.QuickstepClient;
 import spade.storage.quickstep.QuickstepConfiguration;
 import spade.storage.quickstep.QuickstepExecutor;
+import spade.utility.CommonFunctions;
+import spade.utility.ExternalMemoryMap;
+import spade.utility.Hasher;
 
 public class Quickstep extends AbstractStorage {
   private PrintWriter debugLogWriter = null;
   private long timeExecutionStart;
   private QuickstepConfiguration conf;
+
+  private final String md5MapId = "Quickstep[md5ToIdMap]";
+  private ExternalMemoryMap<String, Integer> md5ToIdMap;
+
+  private long totalNumVerticesProcessed = 0;
+  private long totalNumEdgesProcessed = 0;
 
   /**
    * Helper class for bulk loading graph data into Quickstep in batches.
@@ -59,11 +69,9 @@ public class Quickstep extends AbstractStorage {
   private class CopyManager implements Callable<Void> {
     // Double buffer, simple producer-consumer pattern.
     private GraphBatch batchBuffer = new GraphBatch();
-    private int[][] edgeIdPairs;
 
     private StringBuilder vertexMD5 = new StringBuilder();
     private StringBuilder vertexAnnos = new StringBuilder();
-    private StringBuilder edgeMD5 = new StringBuilder();
     private StringBuilder edgeLinks = new StringBuilder();
     private StringBuilder edgeAnnos = new StringBuilder();
 
@@ -76,7 +84,6 @@ public class Quickstep extends AbstractStorage {
     private int maxEdgeValueLength;
 
     public void initialize() {
-      edgeIdPairs = new int[conf.getBatchSize()][2];
       batchExecutor = Executors.newSingleThreadExecutor();
       maxVertexKeyLength = conf.getMaxVertexKeyLength();
       maxVertexValueLength = conf.getMaxVertexValueLength();
@@ -193,13 +200,17 @@ public class Quickstep extends AbstractStorage {
 
     @Override
     public Void call() {
-//      try {
-//        processBatch();
-//      } catch (Exception e) {
-//        StringWriter sw = new StringWriter();
-//        e.printStackTrace(new PrintWriter(sw));
-//        logger.log(Level.SEVERE, e.toString());
-//      }
+      try {
+        processBatch();
+      } catch (Exception e) {
+        StringWriter sw = new StringWriter();
+        e.printStackTrace(new PrintWriter(sw));
+        logger.log(Level.SEVERE, e.toString());
+      }
+      totalNumVerticesProcessed += batchBuffer.getVertices().size();
+      totalNumEdgesProcessed += batchBuffer.getEdges().size();
+      qs.logInfo("Total number of vertices processed: " + totalNumVerticesProcessed);
+      qs.logInfo("Total number of edges processed: " + totalNumEdgesProcessed);
       batchBuffer.reset();
       return null;
     }
@@ -221,24 +232,22 @@ public class Quickstep extends AbstractStorage {
           return;
         }
 
-        qs.submitQuery("DROP TABLE vertex_md5_cache;\n" +
-                       "CREATE TABLE vertex_md5_cache (id INT, md5 CHAR(32))" +
-                       " WITH BLOCKPROPERTIES (TYPE columnstore);");
-
         int counter = lastNumVertices;
         vertexMD5.setLength(0);
         for (AbstractVertex v : vertices) {
           ++counter;
+          final String md5 = v.bigHashCode();
           vertexMD5.append(String.valueOf(counter));
           vertexMD5.append("|");
-          vertexMD5.append(v.bigHashCode());
+          vertexMD5.append(md5);
           vertexMD5.append('\n');
+          md5ToIdMap.put(md5, counter);
         }
-        qs.submitQuery("COPY vertex_md5_cache FROM stdin WITH (DELIMITER '|');",
+        qs.submitQuery("COPY vertex FROM stdin WITH (DELIMITER '|');",
                        vertexMD5.toString());
 
-        qs.submitQuery("INSERT INTO vertex SELECT * FROM vertex_md5_cache;\n" +
-                       "INSERT INTO trace_base_vertex SELECT id FROM vertex_md5_cache;");
+        qs.submitQuery("INSERT INTO trace_base_vertex SELECT " + lastNumVertices +
+                       " + idx FROM generate_series(1, " + vertices.size() +  ") AS t(idx);");
 
         counter = lastNumVertices;
         vertexAnnos.setLength(0);
@@ -269,68 +278,32 @@ public class Quickstep extends AbstractStorage {
         }
         final long startId = lastNumEdges + 1;
 
-        qs.submitQuery("DROP TABLE edge_md5_cache;\n" +
-                       "CREATE TABLE edge_md5_cache (idx INT, src CHAR(32), dst CHAR(32))" +
-                       " WITH BLOCKPROPERTIES (TYPE columnstore);");
-        edgeMD5.setLength(0);
-        for (int i = 0; i < edges.size(); ++i) {
-          edgeMD5.append(i);
-          edgeMD5.append('|');
-          edgeMD5.append(edges.get(i).getChildVertex().bigHashCode());
-          edgeMD5.append('|');
-          edgeMD5.append(edges.get(i).getParentVertex().bigHashCode());
-          edgeMD5.append('\n');
-        }
-        qs.submitQuery("COPY edge_md5_cache FROM stdin WITH (DELIMITER '|');",
-                       edgeMD5.toString());
-
-        qs.submitQuery("INSERT INTO trace_base_edge" +
-                       " SELECT idx + " + startId + " FROM edge_md5_cache;");
-
-        qs.submitQuery("\\analyzecount vertex edge_md5_cache\n" +
-                       "DROP TABLE unique_md5;\n" +
-                       "CREATE TABLE unique_md5 (md5 CHAR(32))" +
-                       " WITH BLOCKPROPERTIES (TYPE columnstore);\n" +
-                       "INSERT INTO unique_md5 SELECT md5 FROM" +
-                       " (SELECT src AS md5 FROM edge_md5_cache UNION ALL" +
-                       "  SELECT dst AS md5 FROM edge_md5_cache) t GROUP BY md5;\n" +
-                       "\\analyzecount unique_md5\n" +
-                       "DROP TABLE vertex_md5_cache;\n" +
-                       "CREATE TABLE vertex_md5_cache (id INT, md5 CHAR(32))" +
-                       " WITH BLOCKPROPERTIES (TYPE columnstore);\n" +
-                       "INSERT INTO vertex_md5_cache SELECT id, md5 FROM vertex" +
-                       " WHERE md5 IN (SELECT md5 FROM unique_md5);\n" +
-                       "\\analyzecount vertex_md5_cache\n");
-
-        String rs = qs.executeQuery(
-            "COPY SELECT c.idx, s.id, d.id" +
-            "     FROM   vertex_md5_cache s, vertex_md5_cache d, edge_md5_cache c" +
-            "     WHERE  s.md5 = c.src AND d.md5 = c.dst" +
-            " TO stdout WITH (DELIMITER e'\\n');");
-        String edgeIdx[] = rs.split("\n");
-        rs = null;
-
-        if (edgeIdx.length % 3 != 0) {
-          logger.log(Level.SEVERE, "Unexpected number of edge triples" + edgeIdx.length);
-        }
-        for (int i = 0; i < edgeIdx.length; i += 3) {
-          int rowIdx = Integer.parseInt(edgeIdx[i]);
-          edgeIdPairs[rowIdx][0] = Integer.parseInt(edgeIdx[i+1]);
-          edgeIdPairs[rowIdx][1] = Integer.parseInt(edgeIdx[i+2]);
-        }
-        edgeIdx = null;
-
         edgeLinks.setLength(0);
         for (int i = 0; i < edges.size(); ++i) {
+          final AbstractVertex srcVertex = edges.get(i).getChildVertex();
+          final AbstractVertex dstVertex = edges.get(i).getParentVertex();
+          final Integer srcId = md5ToIdMap.get(srcVertex.bigHashCode());
+          final Integer dstId = md5ToIdMap.get(dstVertex.bigHashCode());
+          if (srcId == null) {
+            logger.log(Level.SEVERE, "Cannot find id for vertex:\n" + srcVertex.toString());
+            continue;
+          }
+          if (dstId == null) {
+            logger.log(Level.SEVERE, "Cannot find id for vertex:\n" + dstVertex.toString());
+            continue;
+          }
+
           edgeLinks.append(String.valueOf(startId + i));
           edgeLinks.append('|');
-          edgeLinks.append(edgeIdPairs[i][0]);
+          edgeLinks.append(String.valueOf(srcId));
           edgeLinks.append('|');
-          edgeLinks.append(edgeIdPairs[i][1]);
+          edgeLinks.append(String.valueOf(dstId));
           edgeLinks.append('\n');
         }
         qs.submitQuery("COPY edge FROM stdin WITH (DELIMITER '|');",
                        edgeLinks.toString());
+        qs.submitQuery("INSERT INTO trace_base_edge SELECT " + lastNumEdges +
+                       " + idx FROM generate_series(1, " + edges.size() +  ") AS t(idx);");
 
         edgeAnnos.setLength(0);
         for (int i = 0; i < edges.size(); ++i) {
@@ -416,6 +389,32 @@ public class Quickstep extends AbstractStorage {
       }
     }
 
+    // Initialize key-value cache.
+    try {
+      md5ToIdMap = CommonFunctions.createExternalMemoryMapInstance(
+          md5MapId,
+          String.valueOf(conf.getCacheSize()),
+          String.valueOf(conf.getCacheBloomfilterFalsePositiveProbability()),
+          String.valueOf(conf.getCacheBloomFilterExpectedNumberOfElements()),
+          conf.getCacheDatabasePath(),
+          conf.getCacheDatabaseName(),
+          null,
+          new Hasher<String>(){
+            @Override
+            public String getHash(String t) {
+              return t;
+            }
+          });
+
+      if (md5ToIdMap == null){
+        logger.log(Level.SEVERE, "NULL external memory map");
+        return false;
+      }
+    } catch(Exception e) {
+      logger.log(Level.SEVERE, "Failed to create external memory map", e);
+      return false;
+    }
+
     // Initialize Quickstep async executor.
     QuickstepClient client = new QuickstepClient(conf.getServerIP(), conf.getServerPort());
     qs = new QuickstepExecutor(client);
@@ -453,6 +452,10 @@ public class Quickstep extends AbstractStorage {
       copyManager.finalizeBatch();
     }
     copyManager.shutdown();
+    if(md5ToIdMap != null){
+      CommonFunctions.closePrintSizeAndDeleteExternalMemoryMap(md5MapId, md5ToIdMap);
+      md5ToIdMap = null;
+    }
     if (debugLogWriter != null) {
       debugLogWriter.close();
       debugLogWriter = null;
