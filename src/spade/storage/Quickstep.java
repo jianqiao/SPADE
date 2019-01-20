@@ -222,15 +222,27 @@ public class Quickstep extends AbstractStorage {
       qs.logInfo("Start processing batch " + batchBuffer.getBatchID() + " at " +
                  formatTime(System.currentTimeMillis() - timeExecutionStart));
 
+      int lastNumVertices;
+      try {
+        String sn = qs.executeQuery("COPY SELECT COUNT(*) FROM trace_base_vertex TO stdout;");
+        lastNumVertices = Integer.parseInt(sn.trim());
+      } catch (Exception e) {
+        logger.log(Level.SEVERE, e.getMessage());
+        return;
+      }
+
+      long lastNumEdges;
+      try {
+        String sn = qs.executeQuery("COPY SELECT COUNT(*) FROM trace_base_edge TO stdout;");
+        lastNumEdges = Long.parseLong(sn.trim());
+      } catch (Exception e) {
+        logger.log(Level.SEVERE, e.getMessage());
+        return;
+      }
+
       if (vertices.size() > 0) {
-        int lastNumVertices;
-        try {
-          String sn = qs.executeQuery("COPY SELECT COUNT(*) FROM trace_base_vertex TO stdout;");
-          lastNumVertices = Integer.parseInt(sn.trim());
-        } catch (Exception e) {
-          logger.log(Level.SEVERE, e.getMessage());
-          return;
-        }
+        qs.submitQuery("INSERT INTO trace_base_vertex SELECT " + lastNumVertices +
+                       " + idx FROM generate_series(1, " + vertices.size() +  ") AS t(idx);");
 
         int counter = lastNumVertices;
         vertexMD5.setLength(0);
@@ -245,9 +257,6 @@ public class Quickstep extends AbstractStorage {
         }
         qs.submitQuery("COPY vertex FROM stdin WITH (DELIMITER '|');",
                        vertexMD5.toString());
-
-        qs.submitQuery("INSERT INTO trace_base_vertex SELECT " + lastNumVertices +
-                       " + idx FROM generate_series(1, " + vertices.size() +  ") AS t(idx);");
 
         counter = lastNumVertices;
         vertexAnnos.setLength(0);
@@ -268,14 +277,9 @@ public class Quickstep extends AbstractStorage {
       }
 
       if (edges.size() > 0) {
-        long lastNumEdges;
-        try {
-          String sn = qs.executeQuery("COPY SELECT COUNT(*) FROM trace_base_edge TO stdout;");
-          lastNumEdges = Long.parseLong(sn.trim());
-        } catch (Exception e) {
-          logger.log(Level.SEVERE, e.getMessage());
-          return;
-        }
+        qs.submitQuery("INSERT INTO trace_base_edge SELECT " + lastNumEdges +
+                       " + idx FROM generate_series(1, " + edges.size() +  ") AS t(idx);");
+
         final long startId = lastNumEdges + 1;
 
         edgeLinks.setLength(0);
@@ -302,8 +306,6 @@ public class Quickstep extends AbstractStorage {
         }
         qs.submitQuery("COPY edge FROM stdin WITH (DELIMITER '|');",
                        edgeLinks.toString());
-        qs.submitQuery("INSERT INTO trace_base_edge SELECT " + lastNumEdges +
-                       " + idx FROM generate_series(1, " + edges.size() +  ") AS t(idx);");
 
         edgeAnnos.setLength(0);
         for (int i = 0; i < edges.size(); ++i) {
