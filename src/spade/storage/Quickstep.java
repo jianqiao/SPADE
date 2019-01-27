@@ -240,85 +240,61 @@ public class Quickstep extends AbstractStorage {
         return;
       }
 
-      if (vertices.size() > 0) {
-        qs.submitQuery("INSERT INTO trace_base_vertex SELECT " + lastNumVertices +
-                       " + idx FROM generate_series(1, " + vertices.size() +  ") AS t(idx);");
+      int vertexIdCounter = lastNumVertices;
+      long edgeIdCounter = lastNumEdges;
 
-        int counter = lastNumVertices;
-        vertexMD5.setLength(0);
-        for (AbstractVertex v : vertices) {
-          ++counter;
-          final String md5 = v.bigHashCode();
-          vertexMD5.append(String.valueOf(counter));
-          vertexMD5.append("|");
-          vertexMD5.append(md5);
-          vertexMD5.append('\n');
-          md5ToIdMap.put(md5, counter);
+      vertexMD5.setLength(0);
+      vertexAnnos.setLength(0);
+      for (AbstractVertex vertex : vertices) {
+        final String md5 = vertex.bigHashCode();
+        if (md5ToIdMap.get(md5) != null) {
+          continue;
         }
+        appendVertex(vertex, md5, ++vertexIdCounter);
+      }
+
+      edgeLinks.setLength(0);
+      edgeAnnos.setLength(0);
+      for (int i = 0; i < edges.size(); ++i) {
+        final AbstractEdge edge = edges.get(i);
+        final AbstractVertex srcVertex = edge.getChildVertex();
+        final AbstractVertex dstVertex = edge.getParentVertex();
+        final String srcVertexMd5 = srcVertex.bigHashCode();
+        final String dstVertexMd5 = dstVertex.bigHashCode();
+
+        Integer srcVertexId = md5ToIdMap.get(srcVertexMd5);
+        if (srcVertexId == null) {
+          srcVertexId = ++vertexIdCounter;
+          appendVertex(srcVertex, srcVertexMd5, srcVertexId);
+        }
+        Integer dstVertexId = md5ToIdMap.get(dstVertexMd5);
+        if (dstVertexId == null) {
+          dstVertexId = ++vertexIdCounter;
+          appendVertex(dstVertex, dstVertexMd5, dstVertexId);
+        }
+        appendEdge(edge, ++edgeIdCounter, srcVertexId, dstVertexId);
+      }
+
+      if (vertexIdCounter > lastNumVertices) {
+        qs.submitQuery("INSERT INTO trace_base_vertex SELECT idx" +
+                       " FROM generate_series(" + (lastNumVertices + 1) +
+                       ", " + vertexIdCounter +  ") AS t(idx);");
+
         qs.submitQuery("COPY vertex FROM stdin WITH (DELIMITER '|');",
                        vertexMD5.toString());
 
-        counter = lastNumVertices;
-        vertexAnnos.setLength(0);
-        for (AbstractVertex v : vertices) {
-          ++counter;
-          String id = String.valueOf(counter);
-          for (Map.Entry<String, String> annoEntry : v.getAnnotations().entrySet()) {
-            vertexAnnos.append(id);
-            vertexAnnos.append('|');
-            appendEscaped(vertexAnnos, annoEntry.getKey(), maxVertexKeyLength);
-            vertexAnnos.append('|');
-            appendEscaped(vertexAnnos, annoEntry.getValue(), maxVertexValueLength);
-            vertexAnnos.append('\n');
-          }
-        }
         qs.submitQuery("COPY vertex_anno FROM stdin WITH (DELIMITER '|');",
                        vertexAnnos.toString());
       }
 
-      if (edges.size() > 0) {
-        qs.submitQuery("INSERT INTO trace_base_edge SELECT " + lastNumEdges +
-                       " + idx FROM generate_series(1, " + edges.size() +  ") AS t(idx);");
+      if (edgeIdCounter > lastNumEdges) {
+        qs.submitQuery("INSERT INTO trace_base_edge SELECT idx" +
+                       " FROM generate_series(" + (lastNumEdges + 1) +
+                       ", " + edgeIdCounter +  ") AS t(idx);");
 
-        final long startId = lastNumEdges + 1;
-
-        edgeLinks.setLength(0);
-        for (int i = 0; i < edges.size(); ++i) {
-          final AbstractVertex srcVertex = edges.get(i).getChildVertex();
-          final AbstractVertex dstVertex = edges.get(i).getParentVertex();
-          final Integer srcId = md5ToIdMap.get(srcVertex.bigHashCode());
-          final Integer dstId = md5ToIdMap.get(dstVertex.bigHashCode());
-          if (srcId == null) {
-            logger.log(Level.SEVERE, "Cannot find id for vertex:\n" + srcVertex.toString());
-            continue;
-          }
-          if (dstId == null) {
-            logger.log(Level.SEVERE, "Cannot find id for vertex:\n" + dstVertex.toString());
-            continue;
-          }
-
-          edgeLinks.append(String.valueOf(startId + i));
-          edgeLinks.append('|');
-          edgeLinks.append(String.valueOf(srcId));
-          edgeLinks.append('|');
-          edgeLinks.append(String.valueOf(dstId));
-          edgeLinks.append('\n');
-        }
         qs.submitQuery("COPY edge FROM stdin WITH (DELIMITER '|');",
                        edgeLinks.toString());
 
-        edgeAnnos.setLength(0);
-        for (int i = 0; i < edges.size(); ++i) {
-          String id = String.valueOf(startId + i);
-          for (Map.Entry<String, String> annoEntry : edges.get(i).getAnnotations().entrySet()) {
-            edgeAnnos.append(id);
-            edgeAnnos.append('|');
-            appendEscaped(edgeAnnos, annoEntry.getKey(), maxEdgeKeyLength);
-            edgeAnnos.append('|');
-            appendEscaped(edgeAnnos, annoEntry.getValue(), maxEdgeValueLength);
-            edgeAnnos.append('\n');
-          }
-        }
         qs.submitQuery("COPY edge_anno FROM stdin WITH (DELIMITER '|');",
                        edgeAnnos.toString());
       }
@@ -328,6 +304,43 @@ public class Quickstep extends AbstractStorage {
 
       qs.logInfo("Done processing batch " + batchBuffer.getBatchID() + " at " +
                  formatTime(System.currentTimeMillis() - timeExecutionStart));
+    }
+
+    private void appendVertex(AbstractVertex vertex, String md5, final int vertexId) {
+      vertexMD5.append(vertexId);
+      vertexMD5.append("|");
+      vertexMD5.append(md5);
+      vertexMD5.append('\n');
+
+      for (Map.Entry<String, String> annoEntry : vertex.getAnnotations().entrySet()) {
+        vertexAnnos.append(vertexId);
+        vertexAnnos.append('|');
+        appendEscaped(vertexAnnos, annoEntry.getKey(), maxVertexKeyLength);
+        vertexAnnos.append('|');
+        appendEscaped(vertexAnnos, annoEntry.getValue(), maxVertexValueLength);
+        vertexAnnos.append('\n');
+      }
+
+      md5ToIdMap.put(md5, vertexId);
+    }
+
+    private void appendEdge(AbstractEdge edge, final long edgeId,
+                            final int srcVertexId, final int dstVertexId) {
+      edgeLinks.append(String.valueOf(edgeId));
+      edgeLinks.append('|');
+      edgeLinks.append(String.valueOf(srcVertexId));
+      edgeLinks.append('|');
+      edgeLinks.append(String.valueOf(dstVertexId));
+      edgeLinks.append('\n');
+
+      for (Map.Entry<String, String> annoEntry : edge.getAnnotations().entrySet()) {
+        edgeAnnos.append(edgeId);
+        edgeAnnos.append('|');
+        appendEscaped(edgeAnnos, annoEntry.getKey(), maxEdgeKeyLength);
+        edgeAnnos.append('|');
+        appendEscaped(edgeAnnos, annoEntry.getValue(), maxEdgeValueLength);
+        edgeAnnos.append('\n');
+      }
     }
 
     private void appendEscaped(StringBuilder sb, String str, final int maxLength) {
@@ -346,7 +359,7 @@ public class Quickstep extends AbstractStorage {
       }
     }
 
-    private String formatTime(long milliseconds) {
+    private String formatTime(final long milliseconds) {
       long time = milliseconds / 1000;
       StringBuilder sb = new StringBuilder();
       int[] divs = new int[] {
