@@ -25,10 +25,14 @@ import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class QuickstepClient {
   private String serverIp;
   private int serverPort;
+
+  private static Logger logger = Logger.getLogger(QuickstepClient.class.getName());
 
   /**
    * Constructor.
@@ -114,6 +118,8 @@ public class QuickstepClient {
       ++idx;
     }
     totalSize += Long.BYTES * (1 + 2 * numFields);
+
+    logger.log(Level.INFO, "Send data size = " + totalSize);
 
     // 8 bytes: total payload size
     dos.writeLong(totalSize);

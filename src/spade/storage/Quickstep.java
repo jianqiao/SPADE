@@ -48,6 +48,7 @@ import spade.storage.quickstep.GraphBatch;
 import spade.storage.quickstep.QuickstepClient;
 import spade.storage.quickstep.QuickstepConfiguration;
 import spade.storage.quickstep.QuickstepExecutor;
+import spade.storage.quickstep.QuickstepFailure;
 import spade.utility.CommonFunctions;
 import spade.utility.ExternalMemoryMap;
 import spade.utility.Hasher;
@@ -430,6 +431,7 @@ public class Quickstep extends AbstractStorage {
     QuickstepClient client = new QuickstepClient(conf.getServerIP(), conf.getServerPort());
     qs = new QuickstepExecutor(client);
     qs.setLogger(logger);
+    qs.setNumRetriesOnFailure(3);
     if (debugLogWriter != null) {
       qs.setPriortizedLogger((String msg) -> {
         debugLogWriter.println(msg);
@@ -520,7 +522,13 @@ public class Quickstep extends AbstractStorage {
 
   @Override
   public Object executeQuery(String query) {
-    return qs.executeQuery(query);
+    Object result = null;
+    try {
+      result = qs.executeQuery(query);
+    } catch (QuickstepFailure e) {
+      logger.log(Level.SEVERE, "Query execution failed", e);
+    }
+    return result;
   }
 
   public QuickstepExecutor getExecutor() {
