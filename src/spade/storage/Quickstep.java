@@ -205,7 +205,7 @@ public class Quickstep extends AbstractStorage {
       } catch (Exception e) {
         StringWriter sw = new StringWriter();
         e.printStackTrace(new PrintWriter(sw));
-        logger.log(Level.SEVERE, e.toString());
+        logger.log(Level.SEVERE, sw.toString());
       }
       totalNumVerticesProcessed += batchBuffer.getVertices().size();
       totalNumEdgesProcessed += batchBuffer.getEdges().size();
@@ -216,9 +216,6 @@ public class Quickstep extends AbstractStorage {
     }
 
     private void processBatch() {
-      ArrayList<AbstractVertex> vertices = batchBuffer.getVertices();
-      ArrayList<AbstractEdge> edges = batchBuffer.getEdges();
-
       qs.logInfo("Start processing batch " + batchBuffer.getBatchID() + " at " +
                  formatTime(System.currentTimeMillis() - timeExecutionStart));
 
@@ -245,7 +242,7 @@ public class Quickstep extends AbstractStorage {
 
       vertexMD5.setLength(0);
       vertexAnnos.setLength(0);
-      for (AbstractVertex vertex : vertices) {
+      for (AbstractVertex vertex : batchBuffer.getVertices()) {
         final String md5 = vertex.bigHashCode();
         if (md5ToIdMap.get(md5) != null) {
           continue;
@@ -255,8 +252,7 @@ public class Quickstep extends AbstractStorage {
 
       edgeLinks.setLength(0);
       edgeAnnos.setLength(0);
-      for (int i = 0; i < edges.size(); ++i) {
-        final AbstractEdge edge = edges.get(i);
+      for (AbstractEdge edge : batchBuffer.getEdges()) {
         final AbstractVertex srcVertex = edge.getChildVertex();
         final AbstractVertex dstVertex = edge.getParentVertex();
         final String srcVertexMd5 = srcVertex.bigHashCode();
